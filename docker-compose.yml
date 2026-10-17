@@ -1,0 +1,14 @@
+# Infrastructure only: Redis for (a) the distributed spot-allocation lock and (b) gateway rate limiting.
+# The Java services run locally (see README) because the demo H2 databases are file based.
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: parking-redis
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10

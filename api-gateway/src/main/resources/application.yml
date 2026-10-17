@@ -1,0 +1,93 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 500ms
+      connect-timeout: 500ms
+  cloud:
+    loadbalancer:
+      cache:
+        ttl: 5s
+    gateway:
+      discovery:
+        locator:
+          enabled: false           # explicit routes only: internal endpoints must never be exposed by accident
+      routes:
+        - id: parking-ticket-service
+          uri: lb://PARKING-TICKET-SERVICE
+          predicates:
+            - Path=/api/v1/tickets/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: ticketServiceCB
+                fallbackUri: forward:/fallback/ticket-service
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 50
+                redis-rate-limiter.burstCapacity: 100
+                redis-rate-limiter.requestedTokens: 1
+                key-resolver: "#{@ipKeyResolver}"
+
+        # /internal/v1/spots/** (allocate/release) is intentionally NOT routed.
+        - id: spot-allocation-service
+          uri: lb://SPOT-ALLOCATION-SERVICE
+          predicates:
+            - Path=/api/v1/spots/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: spotServiceCB
+                fallbackUri: forward:/fallback/spot-allocation-service
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 10     # deliberately low so the demo can trigger HTTP 429
+                redis-rate-limiter.burstCapacity: 20
+                redis-rate-limiter.requestedTokens: 1
+                key-resolver: "#{@ipKeyResolver}"
+
+        - id: payment-service
+          uri: lb://PAYMENT-SERVICE
+          predicates:
+            - Path=/api/v1/payments/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: paymentServiceCB
+                fallbackUri: forward:/fallback/payment-service
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 50
+                redis-rate-limiter.burstCapacity: 100
+                redis-rate-limiter.requestedTokens: 1
+                key-resolver: "#{@ipKeyResolver}"
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka}
+    registry-fetch-interval-seconds: 5
+  instance:
+    prefer-ip-address: true
+    instance-id: ${spring.cloud.client.ip-address}:${spring.application.name}:${server.port}
+    lease-renewal-interval-in-seconds: 5
+    lease-expiration-duration-in-seconds: 15
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,gateway
+  health:
+    redis:
+      enabled: false
+
+logging:
+  level:
+    com.parking: INFO
